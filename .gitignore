@@ -1,0 +1,43 @@
+# 环境变量（含飞书密钥，绝对不能提交）
+.env
+.env.local
+.env.production
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 构建产物
+frontend/dist/
+backend/frontend_dist/
+
+# Docker
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 临时文件
+*.tmp
+*.bak
+
+# 部署包
+project-dashboard-api-deploy.tar.gz
+
+# Debug脚本
+debug*.js
+
+# WorkBuddy
+.workbuddy/
+
+# 开发文档（不公开）
+项目经营管理系统-多维表格开发文档.md

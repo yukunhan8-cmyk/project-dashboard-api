@@ -1,0 +1,14 @@
+node_modules
+.env
+.workbuddy
+frontend/dist
+*.log
+debug*.js
+DEPLOY_GUIDE.md
+DEPLOY_TENCENT.md
+deploy.sh
+deploy-light.sh
+pack.sh
+项目经营管理系统-多维表格开发文档.md
+project-dashboard-api-deploy.tar.gz
+.git
