@@ -1,0 +1,56 @@
+name: Sync Dashboard Data
+
+on:
+  schedule:
+    - cron: '0 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install backend dependencies
+        run: cd backend && npm install
+
+      - name: Start backend and fetch fresh data
+        env:
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+        run: |
+          cd backend
+          echo "FEISHU_APP_ID=${FEISHU_APP_ID}" > .env
+          echo "FEISHU_APP_SECRET=${FEISHU_APP_SECRET}" >> .env
+          echo "BITABLE_APP_TOKEN=M0h6w56nLik7KxkXjBfcsUinnIf" >> .env
+          echo "TABLE_GMV_OVERVIEW=tbl0GI27Z8nI5pIi" >> .env
+          echo "TABLE_CHANNEL_OVERVIEW=tblR2zifznHivaFe" >> .env
+          echo "TABLE_FUNNEL=tblSq6QKQtLuKpzH" >> .env
+          echo "TABLE_LIVE_DATA=tbldnTOm50vlAVno" >> .env
+          echo "NODE_ENV=production" >> .env
+          echo "SERVE_STATIC=0" >> .env
+          echo "CACHE_TTL=0" >> .env
+          echo "PORT=3000" >> .env
+          node src/index.js &
+          BACKEND_PID=$!
+          sleep 8
+          curl -s "http://localhost:3000/api/dashboard?force=1" -o ../docs/data.json
+          kill $BACKEND_PID
+
+      - name: Validate data
+        run: |
+          node -e "const d=require('./docs/data.json'); if(!d.kpi) {console.error('Invalid data'); process.exit(1)} console.log('Data OK, totalGMV:', d.kpi.totalGmv)"
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/data.json
+          git diff --staged --quiet || (git commit -m "chore: auto-sync dashboard data from Feishu [skip ci]" && git push)
