@@ -10,8 +10,14 @@
 body{font-family:'Inter','PingFang SC','Microsoft YaHei',sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}
 .header{background:linear-gradient(135deg,#1e293b,#334155);padding:20px 32px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #334155}
 .header h1{font-size:22px;font-weight:700;color:#f8fafc}
-.header .sync{display:flex;align-items:center;gap:8px;font-size:13px;color:#94a3b8}
+.header .sync{display:flex;align-items:center;gap:10px;font-size:13px;color:#94a3b8}
 .header .dot{width:8px;height:8px;border-radius:50%;background:#22c55e;animation:pulse 2s infinite}
+.refresh-btn{background:#3b82f6;color:#fff;border:none;border-radius:8px;padding:6px 16px;font-size:13px;font-weight:600;cursor:pointer;transition:all .2s;white-space:nowrap}
+.refresh-btn:hover{background:#2563eb;transform:translateY(-1px)}
+.refresh-btn:active{transform:translateY(0)}
+.refresh-btn:disabled{background:#475569;cursor:not-allowed;transform:none}
+.refresh-btn .spin{display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .container{max-width:1400px;margin:0 auto;padding:24px}
 .kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
@@ -50,7 +56,7 @@ tr:hover td{background:#1e293b}
 <body>
 <div class="header">
 <h1>项目经营管理数据看板</h1>
-<div class="sync"><span class="dot"></span><span id="syncTime">数据加载中...</span></div>
+<div class="sync"><span class="dot"></span><span id="syncTime">数据加载中...</span><button class="refresh-btn" id="refreshBtn" onclick="refreshData()">刷新数据</button></div>
 </div>
 <div class="container">
 <div class="loading" id="loading">正在从飞书获取数据...</div>
@@ -85,6 +91,33 @@ renderLiveTable(d.liveSessions);
 document.getElementById('loading').textContent='数据加载失败: '+e.message;
 });
 
+let allCharts=[];
+function refreshData(){
+const btn=document.getElementById('refreshBtn');
+const oldText=btn.textContent;
+btn.disabled=true;
+btn.innerHTML='<span class="spin"></span>同步中...';
+// Dispose old charts to prevent memory leaks
+allCharts.forEach(c=>{try{c.dispose()}catch(e){}});
+allCharts=[];
+// Cache-bust: append timestamp to force fresh fetch
+fetch('data.json?t='+Date.now()).then(r=>r.json()).then(d=>{
+document.getElementById('syncTime').textContent='更新于 '+new Date(d.lastUpdated).toLocaleString('zh-CN');
+renderKPI(d.kpi);
+renderGmvChart(d.projects);
+renderFunnelChart(d.funnelAggregated);
+renderProjectTable(d.projects);
+renderLiveTable(d.liveSessions);
+btn.disabled=false;
+btn.textContent='已刷新';
+setTimeout(()=>{btn.textContent=oldText},2000);
+}).catch(e=>{
+btn.disabled=false;
+btn.textContent='刷新失败';
+setTimeout(()=>{btn.textContent=oldText},2000);
+});
+}
+
 function renderKPI(k){
 const cards=[
 {label:'总GMV',value:fmtYuan(k.totalGmv),sub:'净GMV '+fmtYuan(k.totalNetGmv),color:'green'},
@@ -99,6 +132,7 @@ document.getElementById('kpiGrid').innerHTML=cards.map(c=>
 
 function renderGmvChart(projects){
 const chart=echarts.init(document.getElementById('gmvChart'));
+allCharts.push(chart);
 const names=projects.map(p=>p.projectId.length>8?p.projectId.slice(0,8)+'...':p.projectId);
 chart.setOption({
 tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
@@ -120,6 +154,7 @@ window.addEventListener('resize',()=>chart.resize());
 
 function renderFunnelChart(f){
 const chart=echarts.init(document.getElementById('funnelChart'));
+allCharts.push(chart);
 const liveData=[
 {name:'直播观看',value:f.live.totalViewers},
 {name:'商品点击',value:f.live.totalClicks},
