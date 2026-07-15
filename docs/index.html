@@ -12,11 +12,12 @@ body{font-family:'Inter','PingFang SC','Microsoft YaHei',sans-serif;background:#
 .header h1{font-size:22px;font-weight:700;color:#f8fafc}
 .header .sync{display:flex;align-items:center;gap:10px;font-size:13px;color:#94a3b8}
 .header .dot{width:8px;height:8px;border-radius:50%;background:#22c55e;animation:pulse 2s infinite}
-.refresh-btn{background:#3b82f6;color:#fff;border:none;border-radius:8px;padding:6px 16px;font-size:13px;font-weight:600;cursor:pointer;transition:all .2s;white-space:nowrap}
+.refresh-btn{background:#3b82f6;color:#fff;border:none;border-radius:8px;padding:6px 16px;font-size:13px;font-weight:600;cursor:pointer;transition:all .2s;white-space:nowrap;min-width:100px}
 .refresh-btn:hover{background:#2563eb;transform:translateY(-1px)}
 .refresh-btn:active{transform:translateY(0)}
 .refresh-btn:disabled{background:#475569;cursor:not-allowed;transform:none}
 .refresh-btn .spin{display:inline-block;width:12px;height:12px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:6px}
+.refresh-status{font-size:11px;color:#64748b;margin-top:4px;text-align:right;max-width:300px}
 @keyframes spin{to{transform:rotate(360deg)}}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .container{max-width:1400px;margin:0 auto;padding:24px}
@@ -56,7 +57,7 @@ tr:hover td{background:#1e293b}
 <body>
 <div class="header">
 <h1>项目经营管理数据看板</h1>
-<div class="sync"><span class="dot"></span><span id="syncTime">数据加载中...</span><button class="refresh-btn" id="refreshBtn" onclick="refreshData()">刷新数据</button></div>
+<div class="sync" style="flex-direction:column;align-items:flex-end"><div style="display:flex;align-items:center;gap:10px"><span class="dot"></span><span id="syncTime">数据加载中...</span><button class="refresh-btn" id="refreshBtn" onclick="refreshData()">同步最新数据</button></div><div class="refresh-status" id="refreshStatus"></div></div>
 </div>
 <div class="container">
 <div class="loading" id="loading">正在从飞书获取数据...</div>
@@ -92,30 +93,97 @@ document.getElementById('loading').textContent='数据加载失败: '+e.message;
 });
 
 let allCharts=[];
-function refreshData(){
+const GH_OWNER='yukunhan8-cmyk';
+const GH_REPO='project-dashboard-api';
+
+function getToken(){
+let t=localStorage.getItem('gh_token');
+if(!t){
+t=prompt('首次使用同步功能，请输入你的 GitHub Token（ghp_ 开头）。\n\nToken 仅保存在你的浏览器本地，不会上传。\n\n获取方式：github.com → Settings → Developer settings → Personal access tokens → 需勾选 repo 和 workflow 权限');
+if(t){localStorage.setItem('gh_token',t.trim());}
+}
+return t;
+}
+
+async function refreshData(){
 const btn=document.getElementById('refreshBtn');
-const oldText=btn.textContent;
+const status=document.getElementById('refreshStatus');
+const token=getToken();
+if(!token){status.textContent='未输入 Token，无法同步';return;}
+
 btn.disabled=true;
-btn.innerHTML='<span class="spin"></span>同步中...';
-// Dispose old charts to prevent memory leaks
+
+try{
+// Step 1: Trigger GitHub Actions workflow
+btn.innerHTML='<span class="spin"></span>触发同步...';
+status.textContent='正在通知 GitHub 服务器从飞书拉取最新数据';
+const triggerResp=await fetch(
+'https://api.github.com/repos/'+GH_OWNER+'/'+GH_REPO+'/actions/workflows/sync-data.yml/dispatches',
+{method:'POST',headers:{'Authorization':'token '+token,'Accept':'application/vnd.github+json','Content-Type':'application/json'},body:JSON.stringify({ref:'main'})}
+);
+if(triggerResp.status===401){localStorage.removeItem('gh_token');throw new Error('Token 无效或已过期');}
+if(!triggerResp.ok)throw new Error('HTTP '+triggerResp.status);
+
+// Step 2: Wait for workflow to start, then poll
+btn.innerHTML='<span class="spin"></span>飞书数据拉取中...';
+status.textContent='飞书 API 正在返回数据，通常需要 30-60 秒';
+await new Promise(r=>setTimeout(r,4000));
+
+let attempts=0;
+const maxAttempts=36;
+let done=false;
+
+while(attempts<maxAttempts){
+const runsResp=await fetch(
+'https://api.github.com/repos/'+GH_OWNER+'/'+GH_REPO+'/actions/runs?per_page=1',
+{headers:{'Authorization':'token '+token,'Accept':'application/vnd.github+json'}}
+);
+const runsData=await runsResp.json();
+const run=runsData.workflow_runs&&runsData.workflow_runs[0];
+if(run&&run.status==='completed'){
+if(run.conclusion==='success'){done=true}else{throw new Error('run '+run.conclusion)}
+break;
+}
+attempts++;
+btn.innerHTML='<span class="spin"></span>同步中... '+(attempts*5)+'s';
+await new Promise(r=>setTimeout(r,5000));
+}
+if(!done)throw new Error('timeout');
+
+// Step 3: Wait for Pages rebuild
+btn.innerHTML='<span class="spin"></span>页面更新中...';
+status.textContent='数据已拉取，正在重建页面';
+await new Promise(r=>setTimeout(r,12000));
+
+// Step 4: Fetch fresh data via GitHub API (bypasses CDN cache)
+btn.innerHTML='<span class="spin"></span>加载新数据...';
 allCharts.forEach(c=>{try{c.dispose()}catch(e){}});
 allCharts=[];
-// Cache-bust: append timestamp to force fresh fetch
-fetch('data.json?t='+Date.now()).then(r=>r.json()).then(d=>{
+const rawResp=await fetch(
+'https://api.github.com/repos/'+GH_OWNER+'/'+GH_REPO+'/contents/docs/data.json',
+{headers:{'Authorization':'token '+token,'Accept':'application/vnd.github.raw'}}
+);
+const d=await rawResp.json();
+
 document.getElementById('syncTime').textContent='更新于 '+new Date(d.lastUpdated).toLocaleString('zh-CN');
 renderKPI(d.kpi);
 renderGmvChart(d.projects);
 renderFunnelChart(d.funnelAggregated);
 renderProjectTable(d.projects);
 renderLiveTable(d.liveSessions);
+
 btn.disabled=false;
-btn.textContent='已刷新';
-setTimeout(()=>{btn.textContent=oldText},2000);
-}).catch(e=>{
+btn.textContent='已更新';
+status.textContent='同步完成，数据已刷新';
+setTimeout(()=>{btn.textContent='同步最新数据';status.textContent='';},3000);
+
+}catch(e){
+console.error('Refresh error:',e);
 btn.disabled=false;
-btn.textContent='刷新失败';
-setTimeout(()=>{btn.textContent=oldText},2000);
-});
+btn.textContent='同步失败';
+status.textContent='失败: '+e.message+'。可在 GitHub Actions 页面手动触发';
+setTimeout(()=>{btn.textContent='同步最新数据';status.textContent='';},5000);
+}
 }
 
 function renderKPI(k){
