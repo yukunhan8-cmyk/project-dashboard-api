@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>项目经营管理数据看板</title>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter','PingFang SC','Microsoft YaHei',sans-serif;background:#0f172a;color:#e2e8f0;min-height:100vh}
+.header{background:linear-gradient(135deg,#1e293b,#334155);padding:20px 32px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #334155}
+.header h1{font-size:22px;font-weight:700;color:#f8fafc}
+.header .sync{display:flex;align-items:center;gap:8px;font-size:13px;color:#94a3b8}
+.header .dot{width:8px;height:8px;border-radius:50%;background:#22c55e;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+.container{max-width:1400px;margin:0 auto;padding:24px}
+.kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+.kpi-card{background:#1e293b;border-radius:12px;padding:20px;border:1px solid #334155;transition:transform .2s}
+.kpi-card:hover{transform:translateY(-2px);border-color:#475569}
+.kpi-label{font-size:13px;color:#94a3b8;margin-bottom:8px}
+.kpi-value{font-size:28px;font-weight:700;color:#f8fafc}
+.kpi-sub{font-size:12px;color:#64748b;margin-top:6px}
+.kpi-value.green{color:#22c55e}
+.kpi-value.blue{color:#3b82f6}
+.kpi-value.orange{color:#f59e0b}
+.kpi-value.purple{color:#a78bfa}
+.chart-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:24px}
+.chart-card{background:#1e293b;border-radius:12px;padding:20px;border:1px solid #334155}
+.chart-title{font-size:15px;font-weight:600;color:#f8fafc;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.chart-title::before{content:'';width:3px;height:16px;background:#3b82f6;border-radius:2px}
+.chart-body{height:320px}
+.table-card{background:#1e293b;border-radius:12px;padding:20px;border:1px solid #334155;margin-bottom:24px}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;padding:12px 16px;font-size:13px;color:#94a3b8;border-bottom:1px solid #334155;font-weight:600;white-space:nowrap}
+td{padding:12px 16px;font-size:14px;color:#cbd5e1;border-bottom:1px solid #1e293b}
+tr:hover td{background:#1e293b}
+.progress-bar{display:inline-block;width:80px;height:6px;background:#334155;border-radius:3px;overflow:hidden;vertical-align:middle}
+.progress-fill{height:100%;border-radius:3px;transition:width .3s}
+.badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:12px;font-weight:500}
+.badge.green{background:rgba(34,197,94,.15);color:#22c55e}
+.badge.blue{background:rgba(59,130,246,.15);color:#3b82f6}
+.badge.orange{background:rgba(245,158,11,.15);color:#f59e0b}
+.badge.red{background:rgba(239,68,68,.15);color:#ef4444}
+.empty-tip{text-align:center;padding:40px;color:#64748b;font-size:14px}
+.loading{display:flex;justify-content:center;align-items:center;height:400px;color:#64748b}
+.footer{text-align:center;padding:20px;color:#475569;font-size:12px}
+@media(max-width:900px){.kpi-grid{grid-template-columns:repeat(2,1fr)}.chart-grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="header">
+<h1>项目经营管理数据看板</h1>
+<div class="sync"><span class="dot"></span><span id="syncTime">数据加载中...</span></div>
+</div>
+<div class="container">
+<div class="loading" id="loading">正在从飞书获取数据...</div>
+<div id="content" style="display:none">
+<div class="kpi-grid" id="kpiGrid"></div>
+<div class="chart-grid">
+<div class="chart-card"><div class="chart-title">项目GMV达成率</div><div class="chart-body" id="gmvChart"></div></div>
+<div class="chart-card"><div class="chart-title">渠道漏斗转化</div><div class="chart-body" id="funnelChart"></div></div>
+</div>
+<div class="table-card"><div class="chart-title">项目明细</div><div style="overflow-x:auto"><table id="projectTable"></table></div></div>
+<div class="table-card"><div class="chart-title">直播数据</div><div style="overflow-x:auto"><table id="liveTable"></table></div></div>
+</div>
+<div class="footer">数据来源：飞书多维表格 | 看板由 CloudStudio 托管</div>
+</div>
+<script>
+const fmtMoney = v => v >= 10000 ? (v/10000).toFixed(1)+'万' : v.toFixed(0);
+const fmtYuan = v => '¥' + Math.round(v).toLocaleString();
+const fmtPct = v => v.toFixed(1)+'%';
+const roiColor = r => r>=3?'green':r>=2?'blue':r>=1?'orange':'red';
+const progressColor = r => r>=100?'#22c55e':r>=80?'#3b82f6':r>=50?'#f59e0b':'#ef4444';
+
+fetch('data.json').then(r=>r.json()).then(d=>{
+document.getElementById('loading').style.display='none';
+document.getElementById('content').style.display='block';
+document.getElementById('syncTime').textContent='更新于 '+new Date(d.lastUpdated).toLocaleString('zh-CN');
+renderKPI(d.kpi);
+renderGmvChart(d.projects);
+renderFunnelChart(d.funnelAggregated);
+renderProjectTable(d.projects);
+renderLiveTable(d.liveSessions);
+}).catch(e=>{
+document.getElementById('loading').textContent='数据加载失败: '+e.message;
+});
+
+function renderKPI(k){
+const cards=[
+{label:'总GMV',value:fmtYuan(k.totalGmv),sub:'净GMV '+fmtYuan(k.totalNetGmv),color:'green'},
+{label:'订单量',value:k.totalOrders,sub:'客单价 '+fmtYuan(k.avgOrderValue),color:'blue'},
+{label:'平均ROI',value:k.avgRoi.toFixed(2),sub:'目标GMV '+fmtYuan(k.totalTargetGmv),color:'orange'},
+{label:'达成率',value:fmtPct(k.targetCompletionRate),sub:k.projectCount+'个进行中项目',color:'purple'}
+];
+document.getElementById('kpiGrid').innerHTML=cards.map(c=>
+`<div class="kpi-card"><div class="kpi-label">${c.label}</div><div class="kpi-value ${c.color}">${c.value}</div><div class="kpi-sub">${c.sub}</div></div>`
+).join('');
+}
+
+function renderGmvChart(projects){
+const chart=echarts.init(document.getElementById('gmvChart'));
+const names=projects.map(p=>p.projectId.length>8?p.projectId.slice(0,8)+'...':p.projectId);
+chart.setOption({
+tooltip:{trigger:'axis',axisPointer:{type:'shadow'}},
+legend:{data:['净GMV','目标GMV','达成率'],textStyle:{color:'#94a3b8'},top:0},
+grid:{left:'3%',right:'4%',bottom:'3%',containLabel:true},
+xAxis:{type:'category',data:names,axisLabel:{color:'#94a3b8',fontSize:11}},
+yAxis:[
+{type:'value',name:'GMV',axisLabel:{color:'#94a3b8',formatter:v=>fmtMoney(v)},splitLine:{lineStyle:{color:'#1e293b'}}},
+{type:'value',name:'达成率(%)',axisLabel:{color:'#94a3b8',formatter:'{value}%'},splitLine:{show:false}}
+],
+series:[
+{name:'净GMV',type:'bar',data:projects.map(p=>p.netGmv),itemStyle:{color:'#3b82f6',borderRadius:[4,4,0,0]}},
+{name:'目标GMV',type:'bar',data:projects.map(p=>p.targetGmv),itemStyle:{color:'#334155',borderRadius:[4,4,0,0]}},
+{name:'达成率',type:'line',yAxisIndex:1,data:projects.map(p=>p.targetGmv>0?+(p.netGmv/p.targetGmv*100).toFixed(1):0),itemStyle:{color:'#f59e0b'},lineStyle:{width:2},symbol:'circle',symbolSize:8,markLine:{data:[{yAxis:100,name:'100%'}],lineStyle:{color:'#22c55e',type:'dashed'},label:{formatter:'100%'}}}
+]
+});
+window.addEventListener('resize',()=>chart.resize());
+}
+
+function renderFunnelChart(f){
+const chart=echarts.init(document.getElementById('funnelChart'));
+const liveData=[
+{name:'直播观看',value:f.live.totalViewers},
+{name:'商品点击',value:f.live.totalClicks},
+{name:'下单量',value:f.live.totalOrders},
+{name:'GMV',value:f.live.totalGmv}
+];
+const svData=[
+{name:'短视频发布',value:f.shortVideo.totalPublish},
+{name:'曝光量',value:f.shortVideo.totalExposure},
+{name:'商品点击',value:f.shortVideo.totalClicks},
+{name:'下单量',value:f.shortVideo.totalOrders}
+];
+chart.setOption({
+tooltip:{trigger:'item',formatter:'{b}: {c}'},
+legend:{data:['直播漏斗','短视频漏斗'],textStyle:{color:'#94a3b8'},top:0},
+grid:{left:'3%',right:'4%',bottom:'3%',containLabel:true},
+xAxis:{type:'category',data:['观看/发布','点击','下单','GMV/曝光'],axisLabel:{color:'#94a3b8'}},
+yAxis:{type:'value',axisLabel:{color:'#94a3b8'},splitLine:{lineStyle:{color:'#1e293b'}}},
+series:[
+{name:'直播漏斗',type:'bar',data:[f.live.totalViewers,f.live.totalClicks,f.live.totalOrders,f.live.totalGmv],itemStyle:{color:'#3b82f6',borderRadius:[4,4,0,0]}},
+{name:'短视频漏斗',type:'bar',data:[f.shortVideo.totalPublish,f.shortVideo.totalClicks,f.shortVideo.totalOrders,f.shortVideo.totalExposure],itemStyle:{color:'#a78bfa',borderRadius:[4,4,0,0]}}
+]
+});
+window.addEventListener('resize',()=>chart.resize());
+}
+
+function renderProjectTable(projects){
+const html=`<thead><tr>
+<th>项目名称</th><th>类型</th><th>状态</th><th>净GMV</th><th>目标GMV</th><th>达成率</th><th>订单</th><th>ROI</th><th>到期</th>
+</tr></thead><tbody>`+projects.map(p=>{
+const rate=p.targetGmv>0?(p.netGmv/p.targetGmv*100):0;
+return `<tr>
+<td style="font-weight:600;color:#f8fafc">${p.projectId}</td>
+<td>${p.projectType||'-'}</td>
+<td><span class="badge green">${p.projectStatus||'进行中'}</span></td>
+<td>${fmtYuan(p.netGmv)}</td>
+<td style="color:#64748b">${fmtYuan(p.targetGmv)}</td>
+<td><span class="progress-bar"><span class="progress-fill" style="width:${Math.min(rate,100)}%;background:${progressColor(rate)}"></span></span> ${rate.toFixed(0)}%</td>
+<td>${p.orderCount}</td>
+<td><span class="badge ${roiColor(p.roi)}">${p.roi.toFixed(1)}</span></td>
+<td style="color:#64748b;font-size:12px">${p.remainingDays||'-'}</td>
+</tr>`;
+}).join('')+`</tbody>`;
+document.getElementById('projectTable').innerHTML=html;
+}
+
+function renderLiveTable(sessions){
+if(!sessions||sessions.length===0){document.getElementById('liveTable').innerHTML='<tr><td class="empty-tip">暂无直播数据</td></tr>';return;}
+const valid=sessions.filter(s=>s.sessionId&&s.sessionId!=='');
+if(valid.length===0){document.getElementById('liveTable').innerHTML='<tbody><tr><td class="empty-tip">暂无直播明细数据</td></tr></tbody>';return;}
+const html=`<thead><tr>
+<th>场次</th><th>关联项目</th><th>主题</th><th>主播</th><th>观看</th><th>峰值</th><th>净GMV</th><th>订单</th><th>投放</th><th>ROI</th>
+</tr></thead><tbody>`+valid.map(s=>`
+<tr>
+<td>${s.sessionId}</td>
+<td style="font-size:12px;color:#94a3b8">${s.projectLink||'-'}</td>
+<td>${s.topic||'-'}</td>
+<td>${s.host||'-'}</td>
+<td>${s.totalViewers||0}</td>
+<td>${s.peakViewers||0}</td>
+<td>${s.netGmv>0?fmtYuan(s.netGmv):'-'}</td>
+<td>${s.orderCount||0}</td>
+<td>${s.adSpend>0?fmtYuan(s.adSpend):'-'}</td>
+<td>${s.roi>0?`<span class="badge ${roiColor(s.roi)}">${s.roi.toFixed(1)}</span>`:'-'}</td>
+</tr>`).join('')+`</tbody>`;
+document.getElementById('liveTable').innerHTML=html;
+}
+</script>
+</body>
+</html>

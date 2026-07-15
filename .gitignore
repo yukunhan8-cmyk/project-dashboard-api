@@ -41,3 +41,9 @@ debug*.js
 
 # 开发文档（不公开）
 项目经营管理系统-多维表格开发文档.md
+
+# 临时数据文件
+dashboard-data.json
+
+# 临时脚本
+set-github-secrets.py
